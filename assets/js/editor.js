@@ -4,11 +4,22 @@
 
   var DRAFT_KEY = "simdec-draft";
   var PUBLISHED = window.SIMDEC_DATA ? JSON.stringify(window.SIMDEC_DATA) : null;
-  var data = null, restoredDraft = false;
+  var BASE_KEY = "simdec-draft-base"; // відбиток опублікованої версії, з якої почато чернетку
+  var data = null, restoredDraft = false, staleDraft = null;
+  function hash(str) {
+    var h = 5381; str = String(str || "");
+    for (var i = 0; i < str.length; i++) h = ((h << 5) + h + str.charCodeAt(i)) | 0;
+    return String(h);
+  }
+  var PUB_HASH = hash(PUBLISHED);
 
   try {
     var d = localStorage.getItem(DRAFT_KEY);
-    if (d && d !== PUBLISHED) { data = JSON.parse(d); restoredDraft = true; }
+    if (d && d !== PUBLISHED) {
+      // чернетку відновлюємо лише якщо сайт відтоді не оновлювався
+      if (localStorage.getItem(BASE_KEY) === PUB_HASH) { data = JSON.parse(d); restoredDraft = true; }
+      else staleDraft = d;
+    }
   } catch (e) {}
   if (!data) data = PUBLISHED ? JSON.parse(PUBLISHED) : emptyData();
 
@@ -63,7 +74,10 @@
     updateStatus();
   }
   function saveDraft() {
-    try { localStorage.setItem(DRAFT_KEY, JSON.stringify(data)); } catch (e) {}
+    try {
+      if (isDirty()) { localStorage.setItem(DRAFT_KEY, JSON.stringify(data)); localStorage.setItem(BASE_KEY, PUB_HASH); }
+      else if (!staleDraft) { localStorage.removeItem(DRAFT_KEY); localStorage.removeItem(BASE_KEY); }
+    } catch (e) {}
   }
   function isDirty() { return JSON.stringify(data) !== PUBLISHED; }
   function updateStatus() {
@@ -220,6 +234,7 @@
     var nCases = data.models.reduce(function (s, m) { return s + m.cases.length; }, 0);
     return '<div class="ed-card">' +
       '<h2>Редактор кейсів SIMDEC</h2>' +
+      (staleDraft ? '<div class="note">У цьому браузері збереглася чернетка, зроблена до останнього оновлення сайту, тому зараз відкрито актуальну версію. <button class="link" data-act="openStale">Відкрити стару чернетку</button> (нові зміни на сайті буде замінено нею)</div>' : "") +
       (restoredDraft ? '<div class="note">Відкрито вашу незавершену чернетку з цього браузера. <button class="link" data-act="reset">Повернутися до опублікованої версії</button></div>' : "") +
       '<p>Зараз у тренажері ' + data.models.length + ' ' + plural(data.models.length, "модель", "моделі", "моделей") + ' і ' + nCases + ' ' + plural(nCases, "кейс", "кейси", "кейсів") + '. Усе, що ви змінюєте тут, автоматично зберігається як чернетка в цьому браузері, тож закрити вкладку можна без втрат.</p>' +
       '<ol class="steps-help">' +
@@ -360,8 +375,12 @@
       case "reset":
         if (!confirm("Відкинути чернетку і повернутися до опублікованої версії?")) return;
         data = JSON.parse(PUBLISHED); restoredDraft = false;
-        try { localStorage.removeItem(DRAFT_KEY); } catch (e2) {}
+        try { localStorage.removeItem(DRAFT_KEY); localStorage.removeItem(BASE_KEY); } catch (e2) {}
         select({ type: "help" }); updateStatus(); return;
+      case "openStale":
+        if (!confirm("Відкрити стару чернетку? Зміни, опубліковані на сайті після неї, у редакторі буде замінено.")) return;
+        data = JSON.parse(staleDraft); staleDraft = null; restoredDraft = true;
+        changed(); select({ type: "help" }); return;
       case "goIssue":
         var gci = b.getAttribute("data-ci");
         select(gci === "" ? { type: "model", mi: +b.getAttribute("data-mi") } : { type: "case", mi: +b.getAttribute("data-mi"), ci: +gci }); return;
