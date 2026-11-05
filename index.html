@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="uk">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SIMDEC · Тренажер управлінських рішень</title>
+  <meta name="description" content="Тренажер управлінських рішень SIMDEC Донецького державного університету внутрішніх справ: кейси за моделями PDCA, OODA, SDCA.">
+  <meta name="theme-color" content="#112F6D">
+  <meta property="og:title" content="SIMDEC · Тренажер управлінських рішень">
+  <meta property="og:description" content="Кейси для керівників Національної поліції та МВС за моделями PDCA, OODA, SDCA.">
+  <meta property="og:image" content="assets/img/og-image.jpg">
+  <link rel="icon" href="favicon.ico">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="assets/css/simdec.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="#/">
+      <img src="assets/img/logo.png" alt="" width="44" height="44">
+      <span class="brand-text">
+        <span class="brand-uni" data-bind="university"></span>
+        <span class="brand-name">SIMDEC <em>тренажер управлінських рішень</em></span>
+      </span>
+    </a>
+    <div class="topbar-user" id="userChip" hidden></div>
+  </header>
+
+  <div class="preview-banner" id="previewBanner" hidden>
+    Режим перегляду чернетки з редактора. Результати не надсилаються.
+  </div>
+
+  <main id="app" class="app" aria-live="polite"></main>
+
+  <footer class="footer">
+    <div class="footer-inner">
+      <div>
+        <strong data-bind="university"></strong>
+        <span data-bind="institute"></span>
+        <span data-bind="department"></span>
+      </div>
+      <div class="footer-copy" data-bind="copyright"></div>
+    </div>
+  </footer>
+
+  <noscript>Для роботи тренажера потрібно увімкнути JavaScript.</noscript>
+  <script src="data/simdec-data.js"></script>
+  <script src="assets/js/cycle.js"></script>
+  <script src="assets/js/app.js"></script>
+</body>
+</html>

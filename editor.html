@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="uk">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SIMDEC · Редактор кейсів</title>
+  <meta name="robots" content="noindex">
+  <link rel="icon" href="favicon.ico">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="assets/css/simdec.css">
+  <link rel="stylesheet" href="assets/css/editor.css">
+</head>
+<body class="editor">
+  <header class="topbar">
+    <a class="brand" href="index.html">
+      <img src="assets/img/logo.png" alt="" width="40" height="40">
+      <span class="brand-text">
+        <span class="brand-uni">SIMDEC</span>
+        <span class="brand-name">Редактор кейсів</span>
+      </span>
+    </a>
+    <div class="ed-actions">
+      <span class="ed-status" id="status"></span>
+      <button class="btn btn-ghost btn-sm" type="button" id="btnImport">Відкрити файл…</button>
+      <button class="btn btn-ghost btn-sm" type="button" id="btnPreview">Переглянути</button>
+      <button class="btn btn-gold btn-sm" type="button" id="btnExport">Завантажити simdec-data.js</button>
+      <input type="file" id="fileInput" accept=".js,.json,application/json,text/javascript" hidden>
+    </div>
+  </header>
+
+  <div class="ed-shell">
+    <nav class="ed-side" id="side" aria-label="Структура"></nav>
+    <main class="ed-main" id="main"></main>
+  </div>
+
+  <div class="toast" id="toast" hidden></div>
+
+  <script src="data/simdec-data.js"></script>
+  <script src="assets/js/cycle.js"></script>
+  <script src="assets/js/editor.js"></script>
+</body>
+</html>
