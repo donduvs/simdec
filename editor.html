@@ -43,7 +43,8 @@
 
   <div class="toast" id="toast" hidden></div>
 
-  <script src="data/simdec-data.js"></script>
+  <!-- дані завантажуються щоразу свіжими, без кешу браузера -->
+  <script>document.write('<script src="data/simdec-data.js?v=' + Date.now() + '"><\/script>');</script>
   <script src="assets/js/cycle.js"></script>
   <script src="assets/js/editor.js"></script>
 </body>
