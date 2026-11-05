@@ -82,7 +82,7 @@
   function isDirty() { return JSON.stringify(data) !== PUBLISHED; }
   function updateStatus() {
     var st = document.getElementById("status");
-    st.textContent = isDirty() ? "Є зміни, ще не завантажені на сайт" : "Збігається з опублікованою версією";
+    st.textContent = isDirty() ? "Є неопубліковані зміни" : "Збігається з опублікованою версією";
     st.className = "ed-status " + (isDirty() ? "dirty" : "clean");
   }
 
@@ -122,6 +122,8 @@
   /* ---------- бічна панель ---------- */
   function renderSide() {
     var h = '<button class="side-link ' + (sel.type === "help" ? "on" : "") + '" data-go="help">Як користуватися</button>' +
+      '<button class="side-link ' + (sel.type === "import" ? "on" : "") + '" data-go="import">Імпорт кейсу з тексту</button>' +
+      '<button class="side-link ' + (sel.type === "publish" ? "on" : "") + '" data-go="publish">Публікація на сайті</button>' +
       '<button class="side-link ' + (sel.type === "settings" ? "on" : "") + '" data-go="settings">Загальні налаштування</button>';
     data.models.forEach(function (m, mi) {
       h += '<div class="side-model" style="--mc:' + esc(m.color) + '">' +
@@ -225,6 +227,8 @@
     else if (sel.type === "model") main.innerHTML = modelForm(sel.mi);
     else if (sel.type === "case") main.innerHTML = caseForm(sel.mi, sel.ci);
     else if (sel.type === "check") main.innerHTML = checkView();
+    else if (sel.type === "import") main.innerHTML = importView();
+    else if (sel.type === "publish") main.innerHTML = publishView();
     else main.innerHTML = helpView();
     main.querySelectorAll("textarea").forEach(grow);
     if (keepScroll) window.scrollTo(0, y);
@@ -241,8 +245,9 @@
         '<li><b>Оберіть ліворуч</b> кейс, який треба виправити, або натисніть «+ Новий кейс» під потрібною моделлю.</li>' +
         '<li><b>Заповніть поля.</b> Етапи кейсу вже створено за етапами моделі. На кожному етапі позначте кружечком один правильний варіант і напишіть пояснення до кожного варіанта.</li>' +
         '<li><b>Натисніть «Переглянути»</b>, щоб пройти кейс у тренажері так, як побачить його здобувач. У режимі перегляду результати не надсилаються.</li>' +
-        '<li><b>Натисніть «Завантажити simdec-data.js»</b> і замініть цим файлом однойменний у папці <code>data</code> репозиторію на GitHub (Add file → Upload files). Через хвилину-дві зміни з’являться на сайті.</li>' +
+        '<li><b>Натисніть «Опублікувати».</b> Першого разу редактор попросить ключ доступу GitHub (інструкція на сторінці «Публікація на сайті»), далі публікація відбувається одним натисканням. Через хвилину-дві зміни з’являться на сайті.</li>' +
       '</ol>' +
+      '<p>Кейс можна також написати окремо в Word чи Блокноті за шаблоном і завантажити: «Імпорт кейсу з тексту» ліворуч.</p>' +
       '<p class="muted">Кнопка «Відкрити файл…» завантажує раніше збережений simdec-data.js, а також окремі кейси у форматі SIMDEC 2 (файли на кшталт pdca4.json): вони додаються до моделі, яку зараз обрано ліворуч.</p>' +
     '</div>';
   }
@@ -308,6 +313,7 @@
         '<button class="btn btn-ghost btn-sm" data-act="cUp" title="Перемістити вище">↑</button>' +
         '<button class="btn btn-ghost btn-sm" data-act="cDown" title="Перемістити нижче">↓</button>' +
         '<button class="btn btn-ghost btn-sm" data-act="cDup">Дублювати</button>' +
+        '<button class="btn btn-ghost btn-sm" data-act="cText" title="Завантажити кейс як текстовий файл">Зберегти як текст</button>' +
         '<select class="btn btn-ghost btn-sm" data-act="cMove" aria-label="Перенести в модель"><option value="">Перенести в…</option>' +
           data.models.map(function (mm, k) { return k === mi ? "" : '<option value="' + k + '">' + esc(mm.name) + '</option>'; }).join("") + '</select>' +
         '<button class="btn btn-danger btn-sm" data-act="cDel">Видалити</button>' +
@@ -498,6 +504,382 @@
       })
     };
   }
+
+
+  /* =====================================================================
+     ІМПОРТ КЕЙСУ З ТЕКСТУ (формат, подібний до GIFT у Moodle)
+     ===================================================================== */
+  var TEXT_KEYS = {
+    "МОДЕЛЬ": "model", "НАЗВА": "title", "КЕЙС": "title", "КОРОТКО": "summary",
+    "ВВІДНА": "scenario", "СИТУАЦІЯ": "scenario", "ЕТАП": "stage", "ПИТАННЯ": "question", "ПОЯСНЕННЯ": "feedback"
+  };
+  var KEY_RE = /^\s*(МОДЕЛЬ|НАЗВА|КЕЙС|КОРОТКО|ВВІДНА|СИТУАЦІЯ|ЕТАП|ПИТАННЯ|ПОЯСНЕННЯ)\s*[:.]\s*(.*)$/i;
+  var OPT_RE = /^\s*(\[\s*\+\s*\]|\(\s*\+\s*\)|\+|\[\s*-\s*\]|\(\s*-\s*\)|[-–—])\s+(.+)$/;
+  var FB_RE = /^\s*>\s?(.*)$/;
+
+  function norm(s) { return String(s || "").toLowerCase().replace(/\(.*?\)/g, "").replace(/[«»"'’ʼ]/g, "").replace(/\s+/g, " ").trim(); }
+  function findModel(v) {
+    var n = norm(v); if (!n) return null;
+    for (var i = 0; i < data.models.length; i++) {
+      var m = data.models[i];
+      if ([m.id, m.name, m.title].some(function (x) { return norm(x) === n || (n.length > 3 && norm(x).indexOf(n) >= 0); })) return i;
+    }
+    return null;
+  }
+  function findStage(m, v, k) {
+    var n = norm(v);
+    if (n) {
+      for (var i = 0; i < m.stages.length; i++) {
+        var s = m.stages[i];
+        if ([s.id, s.code, s.name].some(function (x) { return norm(x) === n; })) return s.id;
+      }
+      var num = parseInt(n, 10);
+      if (num >= 1 && num <= m.stages.length) return m.stages[num - 1].id;
+    }
+    return (m.stages[k] || {}).id || "";
+  }
+  function joinParas(lines) {
+    return lines.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+  }
+
+  /** Розбирає текст на кейси. defaultMi — модель, обрана в інтерфейсі. */
+  function parseCasesText(text, defaultMi) {
+    var lines = String(text || "").replace(/\r/g, "").split("\n");
+    var cases = [], cur = null, step = null, opt = null, field = null, buf = [], warnings = [];
+
+    function flush() {
+      var v = joinParas(buf); buf = [];
+      if (!field) return;
+      if (field === "feedback" && opt) opt.feedback = (opt.feedback ? opt.feedback + "\n\n" : "") + v;
+      else if (field === "optText" && opt) opt.text = (opt.text + (v ? " " + v : "")).trim();
+      else if (field === "question" && step) step.question = v;
+      else if (cur && (field === "title" || field === "summary" || field === "scenario")) cur[field] = v;
+      field = null;
+    }
+    function newCase() { cur = { mi: defaultMi, title: "", summary: "", scenario: "", steps: [] }; cases.push(cur); step = null; opt = null; }
+
+    lines.forEach(function (raw, ln) {
+      var line = raw.replace(/ /g, " ");
+      if (/^\s*#/.test(line)) return;                         // коментар
+      if (/^\s*={3,}\s*$/.test(line)) { flush(); cur = null; return; } // роздільник кейсів
+      var km = line.match(KEY_RE);
+      if (km) {
+        flush();
+        var key = TEXT_KEYS[km[1].toUpperCase()], val = km[2];
+        if (key === "model") {
+          if (!cur || cur.steps.length || cur.title) newCase();
+          var mi = findModel(val);
+          if (mi == null) warnings.push("Рядок " + (ln + 1) + ": модель «" + val.trim() + "» не знайдено, кейс додано до обраної моделі.");
+          else cur.mi = mi;
+          return;
+        }
+        if (key === "title" && cur && (cur.title || cur.steps.length)) newCase();
+        if (!cur) newCase();
+        if (key === "stage") {
+          step = { stageRaw: val.trim(), question: "", options: [] }; cur.steps.push(step); opt = null; return;
+        }
+        if (key === "question" && !step) { step = { stageRaw: "", question: "", options: [] }; cur.steps.push(step); }
+        if (key === "feedback" && !opt) { warnings.push("Рядок " + (ln + 1) + ": пояснення без варіанта відповіді пропущено."); return; }
+        field = key; if (val.trim()) buf.push(val.trim());
+        return;
+      }
+      var om = line.match(OPT_RE);
+      if (om && step && field !== "scenario") {
+        flush();
+        var mark = om[1].replace(/\s/g, "");
+        opt = { text: om[2].trim(), correct: mark.indexOf("+") >= 0, feedback: "" };
+        step.options.push(opt); field = "optText"; return;
+      }
+      var fm = line.match(FB_RE);
+      if (fm && opt) {
+        if (field !== "feedback") { flush(); field = "feedback"; }
+        buf.push(fm[1]); return;
+      }
+      if (!field) {
+        if (line.trim() && cur) warnings.push("Рядок " + (ln + 1) + ": текст поза полями пропущено («" + line.trim().slice(0, 40) + "…»).");
+        return;
+      }
+      if (field === "optText" && !line.trim()) { flush(); return; }
+      buf.push(line.trim());
+    });
+    flush();
+
+    var out = cases.filter(function (c) { return c.title || c.steps.length; }).map(function (c) {
+      var m = data.models[c.mi] || data.models[0];
+      return {
+        mi: data.models.indexOf(m),
+        kase: {
+          id: uid((m.id || "case").toLowerCase()), title: c.title, summary: c.summary, scenario: c.scenario,
+          steps: c.steps.map(function (st, k) {
+            return { stage: findStage(m, st.stageRaw, k), question: st.question, options: st.options };
+          })
+        }
+      };
+    });
+    return { items: out, warnings: warnings };
+  }
+
+  function caseToText(m, c) {
+    var t = "МОДЕЛЬ: " + m.id + "\nНАЗВА: " + (c.title || "") + "\n";
+    if (c.summary) t += "КОРОТКО: " + c.summary + "\n";
+    t += "\nВВІДНА:\n" + (c.scenario || "") + "\n";
+    c.steps.forEach(function (st) {
+      var s = m.stages.filter(function (x) { return x.id === st.stage; })[0];
+      t += "\nЕТАП: " + (s ? s.code : st.stage) + "\nПИТАННЯ:\n" + (st.question || "") + "\n\n";
+      st.options.forEach(function (o) {
+        t += (o.correct ? "+ " : "- ") + o.text + "\n";
+        if (o.feedback) t += o.feedback.split("\n").map(function (x) { return "> " + x; }).join("\n") + "\n";
+      });
+    });
+    return t;
+  }
+
+  var TEMPLATE_TEXT =
+    "# Шаблон кейсу SIMDEC. Рядки, що починаються з #, ігноруються.\n" +
+    "# Кілька кейсів в одному файлі: кожен починайте з рядка МОДЕЛЬ: …\n" +
+    "# Варіанти: + правильний, - хибний. Пояснення до варіанта: рядок з > на початку.\n" +
+    "# ЕТАП: позначення етапу (PLAN, DO, CHECK, ACT, OBSERVE, ORIENT, DECIDE, STANDARDIZE…)\n\n" +
+    "МОДЕЛЬ: OODA\n" +
+    "НАЗВА: Назва вашого кейсу\n" +
+    "КОРОТКО: Одне речення для списку кейсів (необов'язково)\n\n" +
+    "ВВІДНА:\n" +
+    "Опишіть обстановку і роль здобувача. Абзаци розділяйте порожнім рядком.\n\n" +
+    "Другий абзац ввідної.\n\n" +
+    "ЕТАП: OBSERVE\n" +
+    "ПИТАННЯ:\n" +
+    "Що відбувається на цьому етапі. Останній абзац — саме питання.\n\n" +
+    "Які ваші першочергові дії?\n\n" +
+    "+ Правильний варіант дій\n" +
+    "> Чому це правильне рішення.\n" +
+    "- Хибний, але правдоподібний варіант\n" +
+    "> Чому це рішення не спрацює.\n" +
+    "- Ще один хибний варіант\n" +
+    "> Пояснення.\n" +
+    "- Ще один хибний варіант\n" +
+    "> Пояснення.\n\n" +
+    "ЕТАП: ORIENT\n" +
+    "ПИТАННЯ:\n" +
+    "…і так далі для кожного етапу циклу.\n";
+
+  function downloadText(name, text, type) {
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([text], { type: type || "text/plain;charset=utf-8" }));
+    a.download = name; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function () { URL.revokeObjectURL(a.href); }, 2000);
+  }
+
+  var importState = { text: "", parsed: null, mi: 0 };
+
+  function importView() {
+    var p = importState.parsed;
+    var h = '<div class="ed-card"><h2>Імпорт кейсу з текстового файлу</h2>' +
+      '<p>Напишіть кейс у Word або Блокноті за шаблоном, збережіть як <code>.txt</code> або <code>.docx</code> і завантажте сюди. Можна й просто вставити текст у поле нижче.</p>' +
+      '<div class="import-tools">' +
+        '<button class="btn btn-ghost btn-sm" data-act="tplDownload">Завантажити шаблон кейсу</button>' +
+        '<label class="btn btn-primary btn-sm" for="importFile">Обрати файл (.txt, .docx)</label>' +
+        '<input type="file" id="importFile" accept=".txt,.docx,text/plain" hidden>' +
+        '<label class="inline-select">Якщо модель у файлі не вказано: <select id="importModel">' +
+          data.models.map(function (m, i) { return '<option value="' + i + '"' + (i === importState.mi ? " selected" : "") + '>' + esc(m.name) + '</option>'; }).join("") +
+        '</select></label>' +
+      '</div>' +
+      '<div class="field"><label for="importText">Текст кейсу</label><textarea id="importText" rows="14" placeholder="МОДЕЛЬ: OODA&#10;НАЗВА: …&#10;ВВІДНА:&#10;…">' + esc(importState.text) + '</textarea></div>' +
+      '<button class="btn btn-gold" data-act="importParse">Розпізнати</button>' +
+      '</div>';
+    if (p) {
+      h += '<div class="ed-card"><h3 class="sub" style="margin-top:0">Результат розпізнавання</h3>';
+      if (p.warnings.length) h += '<div class="issues"><b>Попередження:</b><ul>' + p.warnings.map(function (w) { return "<li>" + esc(w) + "</li>"; }).join("") + "</ul></div>";
+      if (!p.items.length) h += '<p class="muted">Жодного кейсу не знайдено. Перевірте, що текст містить рядки НАЗВА:, ВВІДНА:, ЕТАП: і варіанти з + або -.</p>';
+      p.items.forEach(function (it) {
+        var m = data.models[it.mi], iss = caseIssues(m, it.kase);
+        h += '<div class="parsed-case" style="--mc:' + esc(m.color) + '"><div><b>' + esc(it.kase.title || "Без назви") + '</b>' +
+          '<span class="muted"> · ' + esc(m.name) + ' · ' + it.kase.steps.length + ' ' + plural(it.kase.steps.length, "етап", "етапи", "етапів") + '</span></div>' +
+          (iss.length ? '<ul class="mini-issues">' + iss.map(function (t) { return "<li>" + esc(t) + "</li>"; }).join("") + '</ul>' : '<p class="ok-text">✓ Кейс заповнено повністю</p>') + '</div>';
+      });
+      if (p.items.length) h += '<button class="btn btn-primary" data-act="importAdd">Додати ' + (p.items.length > 1 ? p.items.length + " " + plural(p.items.length, "кейс", "кейси", "кейсів") : "кейс") + ' до тренажера</button>' +
+        '<p class="hint">Після додавання кейс можна доопрацювати у формі, а потім опублікувати на сайті.</p>';
+      h += '</div>';
+    }
+    return h;
+  }
+
+  main.addEventListener("input", function (e) {
+    if (e.target.id === "importText") importState.text = e.target.value;
+  });
+  main.addEventListener("change", function (e) {
+    if (e.target.id === "importModel") importState.mi = +e.target.value;
+    if (e.target.id !== "importFile") return;
+    var f = e.target.files[0]; if (!f) return;
+    if (/\.docx$/i.test(f.name)) {
+      loadMammoth(function (ok) {
+        if (!ok) { toast("Не вдалося відкрити .docx. Збережіть файл як .txt і спробуйте ще раз."); return; }
+        var r = new FileReader();
+        r.onload = function () {
+          window.mammoth.extractRawText({ arrayBuffer: r.result }).then(function (res) {
+            importState.text = res.value; importState.parsed = parseCasesText(res.value, importState.mi); renderMain();
+          }).catch(function () { toast("Не вдалося прочитати .docx. Збережіть як .txt."); });
+        };
+        r.readAsArrayBuffer(f);
+      });
+    } else {
+      var r = new FileReader();
+      r.onload = function () { importState.text = String(r.result); importState.parsed = parseCasesText(importState.text, importState.mi); renderMain(); };
+      r.readAsText(f, "utf-8");
+    }
+  });
+  function loadMammoth(cb) {
+    if (window.mammoth) return cb(true);
+    var s = document.createElement("script");
+    s.src = "https://cdn.jsdelivr.net/npm/mammoth@1.8.0/mammoth.browser.min.js";
+    s.onload = function () { cb(!!window.mammoth); };
+    s.onerror = function () { cb(false); };
+    document.head.appendChild(s);
+  }
+
+  /* =====================================================================
+     ПУБЛІКАЦІЯ НА САЙТІ ЧЕРЕЗ GITHUB (ключ доступу = пароль редактора)
+     ===================================================================== */
+  var GH_KEY = "simdec-github";
+  var DATA_PATH = "data/simdec-data.js";
+  function ghDefaults() {
+    var host = location.hostname.match(/^([^.]+)\.github\.io$/i);
+    var repo = location.pathname.split("/").filter(Boolean)[0];
+    return { owner: host ? host[1] : "donduvs", repo: host && repo && !/\.html$/.test(repo) ? repo : "simdec", branch: "main", token: "" };
+  }
+  var gh = (function () {
+    var d = ghDefaults();
+    try { var s = JSON.parse(localStorage.getItem(GH_KEY) || "null"); if (s) { d.token = s.token || ""; d.owner = s.owner || d.owner; d.repo = s.repo || d.repo; d.branch = s.branch || d.branch; } } catch (e) {}
+    return d;
+  })();
+  var ghState = { checking: false, ok: null, msg: "", publishing: false };
+
+  function b64encode(str) { return btoa(unescape(encodeURIComponent(str))); }
+  function b64decode(b64) { return decodeURIComponent(escape(atob(String(b64).replace(/\s/g, "")))); }
+  function ghFetch(path, opts) {
+    opts = opts || {};
+    opts.headers = Object.assign({ "Accept": "application/vnd.github+json", "Authorization": "Bearer " + gh.token }, opts.headers || {});
+    return fetch("https://api.github.com/repos/" + encodeURIComponent(gh.owner) + "/" + encodeURIComponent(gh.repo) + path, opts)
+      .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { return { status: r.status, body: j }; }); });
+  }
+  function dataFileText() {
+    return "/* SIMDEC — файл даних. Редагуйте через editor.html, а не вручну. Збережено " + new Date().toLocaleString("uk-UA") + " */\n" +
+      "window.SIMDEC_DATA = " + JSON.stringify(data, null, 2) + ";\n";
+  }
+
+  function publishView() {
+    var connected = !!gh.token;
+    return '<div class="ed-card"><h2>Публікація на сайті</h2>' +
+      '<p>Сайт розміщено на GitHub Pages, тому зміни публікуються через ваш репозиторій. Ключ доступу GitHub працює як пароль редактора: без нього можна готувати чернетки, але змінити сайт неможливо.</p>' +
+      (connected
+        ? '<div class="issues ok">Ключ збережено в цьому браузері для репозиторію ' + esc(gh.owner + "/" + gh.repo) + '.</div>' +
+          '<div class="import-tools"><button class="btn btn-gold" data-act="ghPublish"' + (ghState.publishing ? " disabled" : "") + '>' + (ghState.publishing ? "Публікую…" : "Опублікувати зміни") + '</button>' +
+          '<button class="btn btn-ghost btn-sm" data-act="ghCheck">Перевірити ключ</button>' +
+          '<button class="btn btn-danger btn-sm" data-act="ghForget">Вийти (забути ключ)</button></div>'
+        : '<h3 class="sub">Як отримати ключ (один раз)</h3>' +
+          '<ol class="steps-help">' +
+            '<li>Увійдіть на GitHub під акаунтом <b>' + esc(gh.owner) + '</b> і відкрийте <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">Settings → Developer settings → Fine-grained tokens → Generate new token</a>.</li>' +
+            '<li>Назва: SIMDEC editor. Expiration: 1 рік. Resource owner: <b>' + esc(gh.owner) + '</b>.</li>' +
+            '<li>Repository access: <b>Only select repositories</b> → <b>' + esc(gh.repo) + '</b>.</li>' +
+            '<li>Permissions → Repository permissions → <b>Contents: Read and write</b>. Більше нічого не вмикайте.</li>' +
+            '<li>Натисніть Generate token, скопіюйте ключ (починається з github_pat_) і вставте нижче.</li>' +
+          '</ol>' +
+          '<div class="row3">' +
+            '<div class="field"><label for="ghOwner">Акаунт</label><input type="text" id="ghOwner" value="' + esc(gh.owner) + '"></div>' +
+            '<div class="field"><label for="ghRepo">Репозиторій</label><input type="text" id="ghRepo" value="' + esc(gh.repo) + '"></div>' +
+            '<div class="field"><label for="ghBranch">Гілка</label><input type="text" id="ghBranch" value="' + esc(gh.branch) + '"></div>' +
+          '</div>' +
+          '<div class="field"><label for="ghToken">Ключ доступу</label><input type="password" id="ghToken" autocomplete="off" placeholder="github_pat_…"></div>' +
+          '<p class="hint">Ключ зберігається лише в цьому браузері. Не зберігайте його на спільних комп\'ютерах; на чужому комп\'ютері після роботи натисніть «Вийти».</p>' +
+          '<button class="btn btn-primary" data-act="ghSave">Зберегти ключ і перевірити</button>') +
+      (ghState.msg ? '<p class="' + (ghState.ok === false ? "form-error" : "ok-text") + '" style="margin-top:14px">' + esc(ghState.msg) + '</p>' : "") +
+      '</div>';
+  }
+
+  function ghCheck() {
+    ghState.msg = "Перевіряю ключ…"; ghState.ok = null; renderMain();
+    return ghFetch("").then(function (r) {
+      if (r.status === 200 && r.body.permissions && r.body.permissions.push) { ghState.ok = true; ghState.msg = "Ключ дійсний, публікувати можна."; }
+      else if (r.status === 200) { ghState.ok = false; ghState.msg = "Ключ дійсний, але не має права запису. Увімкніть Contents: Read and write."; }
+      else if (r.status === 401) { ghState.ok = false; ghState.msg = "Ключ недійсний або прострочений. Створіть новий."; }
+      else if (r.status === 404) { ghState.ok = false; ghState.msg = "Репозиторій не знайдено або ключ не має до нього доступу."; }
+      else { ghState.ok = false; ghState.msg = "GitHub повернув помилку " + r.status + "."; }
+      renderMain(); return ghState.ok;
+    }).catch(function () { ghState.ok = false; ghState.msg = "Немає зв'язку з GitHub. Перевірте інтернет."; renderMain(); return false; });
+  }
+
+  function ghPublish() {
+    var iss = allIssues();
+    if (iss.length && !confirm("Знайдено зауважень: " + iss.length + ". Незаповнені кейси можуть некоректно працювати. Опублікувати все одно?")) { select({ type: "check" }); return; }
+    if (!isDirty() && !confirm("Змін відносно опублікованої версії немає. Опублікувати повторно?")) return;
+    ghState.publishing = true; ghState.msg = ""; if (sel.type === "publish") renderMain();
+    ghFetch("/contents/" + DATA_PATH + "?ref=" + encodeURIComponent(gh.branch)).then(function (r) {
+      if (r.status !== 200) throw r;
+      var remote = null;
+      try { var t = b64decode(r.body.content); remote = JSON.stringify(JSON.parse(t.slice(t.indexOf("{"), t.lastIndexOf("}") + 1))); } catch (e) {}
+      if (remote && remote !== PUBLISHED && remote !== JSON.stringify(data) &&
+          !confirm("Після того як ви відкрили редактор, на сайті вже опублікували іншу версію (можливо, колега). Якщо продовжити, її буде замінено вашою. Продовжити?")) throw { cancelled: true };
+      return ghFetch("/contents/" + DATA_PATH, {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: "Оновлення кейсів через редактор SIMDEC", content: b64encode(dataFileText()), sha: r.body.sha, branch: gh.branch })
+      });
+    }).then(function (r) {
+      if (!r || r.status === undefined) return;
+      if (r.status !== 200 && r.status !== 201) throw r;
+      PUBLISHED = JSON.stringify(data); PUB_HASH = hash(PUBLISHED); restoredDraft = false; staleDraft = null;
+      try { localStorage.removeItem(DRAFT_KEY); localStorage.removeItem(BASE_KEY); } catch (e) {}
+      ghState.publishing = false; ghState.ok = true; ghState.msg = "Опубліковано. Сайт оновиться протягом 1–2 хвилин.";
+      updateStatus(); renderSide(); if (sel.type === "publish") renderMain();
+      toast("Опубліковано. Сайт оновиться за 1–2 хвилини.");
+    }).catch(function (err) {
+      ghState.publishing = false;
+      if (err && err.cancelled) { ghState.msg = ""; renderMain(); return; }
+      ghState.ok = false;
+      ghState.msg = err && err.status === 401 ? "Ключ недійсний або прострочений. Вийдіть і введіть новий." :
+        err && err.status === 409 ? "Файл на сайті щойно змінився. Натисніть «Опублікувати» ще раз." :
+        err && err.status ? "Не вдалося опублікувати (помилка GitHub " + err.status + ")." : "Немає зв'язку з GitHub. Перевірте інтернет.";
+      select({ type: "publish" });
+    });
+  }
+
+  main.addEventListener("click", function (e) {
+    var b = e.target.closest("[data-act]"); if (!b) return;
+    var act = b.getAttribute("data-act");
+    if (act === "tplDownload") downloadText("Шаблон кейсу SIMDEC.txt", TEMPLATE_TEXT);
+    if (act === "importParse") { importState.text = document.getElementById("importText").value; importState.parsed = parseCasesText(importState.text, importState.mi); renderMain(); }
+    if (act === "importAdd" && importState.parsed) {
+      var last = null;
+      importState.parsed.items.forEach(function (it) { data.models[it.mi].cases.push(it.kase); last = { type: "case", mi: it.mi, ci: data.models[it.mi].cases.length - 1 }; });
+      var n = importState.parsed.items.length;
+      importState = { text: "", parsed: null, mi: importState.mi };
+      changed(); select(last); toast("Додано " + n + " " + plural(n, "кейс", "кейси", "кейсів") + ". Не забудьте опублікувати.");
+    }
+    if (act === "cText") {
+      var m = data.models[sel.mi], c = m.cases[sel.ci];
+      downloadText((c.title || "Кейс").replace(/[\\/:*?"<>|]/g, "").slice(0, 60) + ".txt", caseToText(m, c));
+    }
+    if (act === "ghSave") {
+      gh.owner = document.getElementById("ghOwner").value.trim(); gh.repo = document.getElementById("ghRepo").value.trim();
+      gh.branch = document.getElementById("ghBranch").value.trim() || "main"; gh.token = document.getElementById("ghToken").value.trim();
+      if (!gh.token) { ghState.ok = false; ghState.msg = "Вставте ключ доступу."; renderMain(); return; }
+      ghCheck().then(function (ok) {
+        if (ok) { try { localStorage.setItem(GH_KEY, JSON.stringify(gh)); } catch (e2) {} renderMain(); }
+        else { gh.token = ""; renderMain(); }
+      });
+    }
+    if (act === "ghCheck") ghCheck();
+    if (act === "ghForget") {
+      gh.token = ""; try { localStorage.removeItem(GH_KEY); } catch (e3) {}
+      ghState = { ok: null, msg: "Ключ видалено з цього браузера.", publishing: false }; renderMain();
+    }
+    if (act === "ghPublish") ghPublish();
+  });
+
+  document.getElementById("btnPublish").addEventListener("click", function () {
+    if (gh.token) ghPublish(); else select({ type: "publish" });
+  });
+  document.getElementById("btnTextImport").addEventListener("click", function () { select({ type: "import" }); });
+
+  // для автоматичних перевірок
+  window.__simdecEditor = { parse: function (t, mi) { return parseCasesText(t, mi); }, toText: caseToText, data: function () { return data; } };
 
   window.addEventListener("beforeunload", saveDraft);
 

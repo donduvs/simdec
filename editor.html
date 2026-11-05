@@ -23,9 +23,15 @@
     </a>
     <div class="ed-actions">
       <span class="ed-status" id="status"></span>
-      <button class="btn btn-ghost btn-sm" type="button" id="btnImport">Відкрити файл…</button>
+      <button class="btn btn-ghost btn-sm" type="button" id="btnTextImport">Імпорт кейсу</button>
       <button class="btn btn-ghost btn-sm" type="button" id="btnPreview">Переглянути</button>
-      <button class="btn btn-gold btn-sm" type="button" id="btnExport">Завантажити simdec-data.js</button>
+      <button class="btn btn-gold btn-sm" type="button" id="btnPublish">Опублікувати</button>
+      <details class="ed-more"><summary class="btn btn-ghost btn-sm">Ще</summary>
+        <div class="ed-more-menu">
+          <button type="button" id="btnImport">Відкрити файл даних…</button>
+          <button type="button" id="btnExport">Завантажити simdec-data.js</button>
+        </div>
+      </details>
       <input type="file" id="fileInput" accept=".js,.json,application/json,text/javascript" hidden>
     </div>
   </header>
